@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState } from 'react';
 import {
     Animated,
@@ -12,10 +11,63 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import * as SQLite from 'expo-sqlite';
+import * as Crypto from 'expo-crypto';
 
 const GRID_SIZE = 4;
-const RANKING_KEY = 'top5Ranking';
 
+// Banco de Dados (SQLite)
+async function openDb() {
+  return SQLite.openDatabaseAsync('game2048.db');
+}
+
+async function initDB() {
+  const db = await openDb();
+  await db.execAsync(`
+    PRAGMA journal_mode = WAL;
+    CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS ranking (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, score INTEGER NOT NULL);
+  `);
+  const highScoreResult = await db.getFirstAsync('SELECT value FROM settings WHERE key = ?', 'highScore');
+  if (!highScoreResult) {
+      await db.runAsync('INSERT INTO settings (key, value) VALUES (?, ?)', 'highScore', '0');
+  }
+}
+
+async function getHighScoreFromDB() {
+  const db = await openDb();
+  const result = await db.getFirstAsync('SELECT value FROM settings WHERE key = ?', 'highScore');
+  return result ? parseInt(result.value, 10) : 0;
+}
+
+async function updateHighScoreInDB(score) {
+  const db = await openDb();
+  await db.runAsync('UPDATE settings SET value = ? WHERE key = ?', score.toString(), 'highScore');
+}
+
+async function getRankingFromDB() {
+  const db = await openDb();
+  return await db.getAllAsync('SELECT * FROM ranking ORDER BY score DESC LIMIT 5');
+}
+
+async function saveRankingToDB(playerName, score) {
+    const db = await openDb();
+    const newId = Crypto.randomUUID();
+    await db.runAsync(
+      'INSERT INTO ranking (id, name, score) VALUES (?, ?, ?)',
+      newId,
+      playerName || 'Anônimo',
+      score
+    );
+    const allScores = await db.getAllAsync('SELECT id FROM ranking ORDER BY score DESC');
+    if (allScores.length > 5) {
+        const idsToDelete = allScores.slice(5).map(item => item.id);
+        const placeholders = idsToDelete.map(() => '?').join(',');
+        await db.runAsync(`DELETE FROM ranking WHERE id IN (${placeholders})`, ...idsToDelete);
+    }
+}
+
+// Lógica do Jogo
 function getEmptyGrid() {
   return Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(0));
 }
@@ -108,18 +160,15 @@ export default function GameScreen() {
 
   useEffect(() => {
     const init = async () => {
-      const saved = await AsyncStorage.getItem('highScore');
-      if (saved) setHighScore(parseInt(saved));
-
-      const storedRanking = await AsyncStorage.getItem(RANKING_KEY);
-      if (storedRanking) {
-        setRanking(JSON.parse(storedRanking));
-      }
-
+      await initDB();
+      const initialHighScore = await getHighScoreFromDB();
+      setHighScore(initialHighScore);
+      const initialRanking = await getRankingFromDB();
+      setRanking(initialRanking);
       const startGrid = addRandomTile(addRandomTile(getEmptyGrid()));
       setGrid(startGrid);
     };
-    init();
+    init().catch(err => console.error("Erro ao inicializar o jogo:", err));
   }, []);
 
   useEffect(() => {
@@ -129,12 +178,9 @@ export default function GameScreen() {
         duration: 400,
         useNativeDriver: true,
       }).start();
-
-      // verificar se score entra no top 5
-      const newList = [...ranking, { name: '', score }];
-      const topSorted = newList.sort((a, b) => b.score - a.score).slice(0, 5);
-      const isInTop5 = topSorted.some(entry => entry.score === score && entry.name === '');
-      setIsTop5(isInTop5);
+      const topScores = [...ranking].sort((a, b) => b.score - a.score);
+      const isLowScore = topScores.length >= 5 && score <= topScores[4].score;
+      setIsTop5(!isLowScore);
     } else {
       fadeAnim.setValue(0);
       setPlayerName('');
@@ -142,10 +188,9 @@ export default function GameScreen() {
   }, [gameOver]);
 
   const saveRanking = async () => {
-    const newList = [...ranking, { name: playerName || 'Anônimo', score }];
-    const sorted = newList.sort((a, b) => b.score - a.score).slice(0, 5);
-    setRanking(sorted);
-    await AsyncStorage.setItem(RANKING_KEY, JSON.stringify(sorted));
+    await saveRankingToDB(playerName, score);
+    const updatedRanking = await getRankingFromDB();
+    setRanking(updatedRanking);
     resetGame();
   };
 
@@ -159,18 +204,16 @@ export default function GameScreen() {
 
   const panResponder = PanResponder.create({
     onMoveShouldSetPanResponder: (_, { dx, dy }) => Math.abs(dx) > 20 || Math.abs(dy) > 20,
-    onPanResponderRelease: (_, { dx, dy }) => {
+    onPanResponderRelease: async (_, { dx, dy }) => {
       if (gameOver) return;
       const absDx = Math.abs(dx), absDy = Math.abs(dy);
       let newGrid = grid;
       const scoreRef = { value: 0 };
-
       if (absDx > absDy) {
         newGrid = dx > 0 ? moveRight(grid, scoreRef) : moveLeft(grid, scoreRef);
       } else {
         newGrid = dy > 0 ? moveDown(grid, scoreRef) : moveUp(grid, scoreRef);
       }
-
       if (!gridsAreEqual(grid, newGrid)) {
         newGrid = addRandomTile(newGrid);
         const newScore = score + scoreRef.value;
@@ -178,7 +221,7 @@ export default function GameScreen() {
         setScore(newScore);
         if (newScore > highScore) {
           setHighScore(newScore);
-          AsyncStorage.setItem('highScore', newScore.toString());
+          await updateHighScoreInDB(newScore);
         }
         if (!hasValidMoves(newGrid)) {
           setGameOver(true);
@@ -191,8 +234,8 @@ export default function GameScreen() {
     grid.map((row, rIdx) => (
       <View key={rIdx} style={styles.row}>
         {row.map((val, cIdx) => (
-          <View key={cIdx} style={styles.tile}>
-            <Text style={styles.tileText} numberOfLines={1} adjustsFontSizeToFit>
+          <View key={cIdx} style={[styles.tile, getTileColor(val)]}>
+            <Text style={[styles.tileText, getTileTextColor(val)]} numberOfLines={1} adjustsFontSizeToFit>
               {val !== 0 ? val : ''}
             </Text>
           </View>
@@ -200,33 +243,39 @@ export default function GameScreen() {
       </View>
     ));
 
+  const getTileColor = (value) => {
+    const colors = {
+      2: '#eee4da', 4: '#ede0c8', 8: '#f2b179', 16: '#f59563', 32: '#f67c5f', 64: '#f65e3b',
+      128: '#edcf72', 256: '#edcc61', 512: '#edc850', 1024: '#edc53f', 2048: '#edc22e'
+    };
+    return { backgroundColor: colors[value] || '#cdc1b4' };
+  };
+  const getTileTextColor = (value) => ({ color: value > 4 ? '#f9f6f2' : '#776e65' });
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={styles.container}
       {...panResponder.panHandlers}
     >
-      <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
+      <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}>
         <Text style={styles.title}>2048</Text>
-
         <View style={styles.scoreContainer}>
-          <Text style={styles.scoreText} numberOfLines={1} adjustsFontSizeToFit>
-            Score: {score}
-          </Text>
-          <Text style={styles.scoreText} numberOfLines={1} adjustsFontSizeToFit>
-            High Score: {highScore}
-          </Text>
+          <View style={styles.scoreBox}>
+            <Text style={styles.scoreLabel}>SCORE</Text>
+            <Text style={styles.scoreValue}>{score}</Text>
+          </View>
+          <View style={styles.scoreBox}>
+            <Text style={styles.scoreLabel}>BEST</Text>
+            <Text style={styles.scoreValue}>{highScore}</Text>
+          </View>
         </View>
-
         <View style={styles.grid}>{renderGrid()}</View>
-
         {gameOver && (
-          <Animated.View style={[styles.overlay, { opacity: fadeAnim }]}>
+          <Animated.View style={[styles.overlay, { opacity: fadeAnim }]}> 
             {isTop5 ? (
               <>
-                <Text style={styles.gameOverText} numberOfLines={1} adjustsFontSizeToFit>
-                  Você entrou no ranking!
-                </Text>
+                <Text style={styles.gameOverText} adjustsFontSizeToFit>Você entrou no ranking!</Text>
                 <TextInput
                   style={styles.input}
                   placeholder="Digite seu nome"
@@ -235,35 +284,26 @@ export default function GameScreen() {
                   placeholderTextColor="#aaa"
                 />
                 <TouchableOpacity onPress={saveRanking} style={styles.resetButton}>
-                  <Text style={styles.resetButtonText} numberOfLines={1} adjustsFontSizeToFit>
-                    Salvar e Reiniciar
-                  </Text>
+                  <Text style={styles.resetButtonText}>Salvar e Reiniciar</Text>
                 </TouchableOpacity>
               </>
             ) : (
               <>
-                <Text style={styles.gameOverText} numberOfLines={1} adjustsFontSizeToFit>
-                  Game Over
-                </Text>
+                <Text style={styles.gameOverText}>Game Over</Text>
                 <TouchableOpacity onPress={resetGame} style={styles.resetButton}>
-                  <Text style={styles.resetButtonText} numberOfLines={1} adjustsFontSizeToFit>
-                    Reiniciar
-                  </Text>
+                  <Text style={styles.resetButtonText}>Reiniciar</Text>
                 </TouchableOpacity>
               </>
             )}
           </Animated.View>
         )}
-
         <View style={styles.rankingBox}>
-          <Text style={styles.rankingTitle} numberOfLines={1} adjustsFontSizeToFit>
-            Ranking TOP 5
-          </Text>
-          {ranking.map((entry, i) => (
-            <Text key={i} style={styles.rankingItem} numberOfLines={1} adjustsFontSizeToFit>
+          <Text style={styles.rankingTitle}>Ranking TOP 5</Text>
+          {ranking.length > 0 ? ranking.map((entry, i) => (
+            <Text key={entry.id} style={styles.rankingItem} numberOfLines={1}>
               {i + 1}. {entry.name} - {entry.score}
             </Text>
-          ))}
+          )) : <Text style={styles.rankingItem}>Jogue para entrar no ranking!</Text>}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -271,100 +311,144 @@ export default function GameScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#faf8ef' },
-  title: { fontSize: 36, fontWeight: 'bold', marginTop: 40, textAlign: 'center', color: '#776e65' },
+  container: {
+    flex: 1,
+    backgroundColor: '#faf8ef',
+    paddingHorizontal: 16,
+    paddingTop: 32,
+    paddingBottom: 16,
+  },
+  title: {
+    fontSize: 48,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    color: '#776e65',
+    marginBottom: 12,
+    letterSpacing: 2,
+  },
   scoreContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    width: '80%',
+    justifyContent: 'center',
     alignSelf: 'center',
-    marginVertical: 10,
+    gap: 12,
+    marginBottom: 24,
   },
-  scoreText: {
-    fontSize: 18,
+  scoreBox: {
+    backgroundColor: '#bbada0',
+    paddingHorizontal: 28,
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+    minWidth: 90,
+  },
+  scoreLabel: {
+    fontSize: 14,
     fontWeight: 'bold',
-    color: '#776e65',
-    flex: 1,
-    textAlign: 'center',
+    color: '#eee4da',
+    marginBottom: 2,
+    letterSpacing: 1,
+  },
+  scoreValue: {
+    fontSize: 26,
+    fontWeight: 'bold',
+    color: '#ffffff',
   },
   grid: {
     backgroundColor: '#bbada0',
-    padding: 5,
-    borderRadius: 10,
+    padding: 8,
+    borderRadius: 12,
     alignSelf: 'center',
-    marginBottom: 20,
+    marginBottom: 18,
   },
-  row: { flexDirection: 'row' },
+  row: {
+    flexDirection: 'row',
+  },
   tile: {
-    width: 70,
-    height: 70,
-    backgroundColor: '#cdc1b4',
-    margin: 5,
+    width: 64,
+    height: 64,
+    margin: 4,
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 5,
+    borderRadius: 6,
   },
   tileText: {
     fontWeight: 'bold',
-    color: '#776e65',
     fontSize: 24,
     textAlign: 'center',
     width: '100%',
-    paddingHorizontal: 4,
   },
   overlay: {
     position: 'absolute',
-    top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(238, 228, 218, 0.85)',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 10,
-    padding: 20,
+    padding: 24,
+    borderRadius: 12,
   },
   gameOverText: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 20,
-    width: '100%',
+    color: '#776e65',
+    marginBottom: 18,
     textAlign: 'center',
   },
   input: {
     backgroundColor: '#fff',
-    padding: 10,
+    padding: 12,
     borderRadius: 8,
     width: '80%',
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: 18,
     fontSize: 18,
+    borderWidth: 1,
+    borderColor: '#ccc',
   },
   resetButton: {
-    backgroundColor: '#f67c5f',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
+    backgroundColor: '#8f7a66',
+    paddingVertical: 14,
+    paddingHorizontal: 32,
     borderRadius: 8,
-    minWidth: 150,
+    minWidth: 160,
     alignItems: 'center',
+    marginTop: 6,
   },
   resetButtonText: {
-    color: '#fff',
+    color: '#f9f6f2',
     fontSize: 18,
     fontWeight: 'bold',
-    width: '100%',
     textAlign: 'center',
+    letterSpacing: 1,
   },
   rankingBox: {
-    marginTop: 20,
+    marginTop: 36,
     alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: '#f3ede6',
+    borderRadius: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
   },
   rankingTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    marginBottom: 6,
-    color: '#333',
+    marginBottom: 10,
+    color: '#776e65',
+    letterSpacing: 1,
   },
   rankingItem: {
     fontSize: 16,
-    color: '#444',
+    color: '#776e65',
+    marginBottom: 4,
+    fontWeight: '500',
+    letterSpacing: 0.5,
   },
 });
