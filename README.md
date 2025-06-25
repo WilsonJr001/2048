@@ -1,50 +1,109 @@
-# Welcome to your Expo app 👋
+cat << 'EOF' > README.md
+# 🎮 Jogo 2048 - React Native + Expo
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Este é um clone mobile do famoso jogo **2048**, desenvolvido usando **React Native** com **Expo Router**. O jogo é simples, viciante e traz recursos como pontuação, ranking local dos 5 melhores jogadores e animação de Game Over.
 
-## Get started
+## ✨ Funcionalidades
 
-1. Install dependencies
+- ✅ Movimentação por gestos (swipe)
+- ✅ Tiles que se fundem (lógica original do 2048)
+- ✅ Pontuação e recorde (Highscore)
+- ✅ Animação de Game Over
+- ✅ Salvamento de ranking com os 5 maiores scores
+- ✅ Input do nome ao entrar no ranking
+- ✅ Tela inicial com botão de começar jogo
+- ✅ Design responsivo com prevenção de corte de texto
 
-   ```bash
+---
+
+## 🧪 Tecnologias Utilizadas
+
+- [React Native](https://reactnative.dev/)
+- [Expo](https://expo.dev/)
+- [Expo Router](https://expo.github.io/router/)
+- [AsyncStorage](https://react-native-async-storage.github.io/async-storage/) para salvar ranking e recordes
+- [Animated API](https://reactnative.dev/docs/animated) para animações de tela
+
+---
+
+## 📲 Instalação e Execução
+
+### Pré-requisitos
+
+- Node.js instalado
+- Expo CLI instalada globalmente  
+  \`\`\`bash
+  npm install -g expo-cli
+  \`\`\`
+
+### Passos para rodar:
+
+1. Clone o repositório:
+
+   \`\`\`bash
+   git clone https://github.com/seu-usuario/2048-react-native.git
+   cd 2048-react-native
+   \`\`\`
+
+2. Instale as dependências:
+
+   \`\`\`bash
    npm install
-   ```
+   \`\`\`
 
-2. Start the app
+3. Rode o app com o Expo:
 
-   ```bash
+   \`\`\`bash
    npx expo start
-   ```
+   \`\`\`
 
-In the output, you'll find options to open the app in a
+4. Escaneie o QR Code com o app do Expo no seu celular (ou use um emulador Android/iOS).
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+---
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+## 📁 Estrutura de Pastas
 
-## Get a fresh project
+\`\`\`
+app/
+├── index.jsx           # Tela inicial do jogo
+└── game/
+    └── GameScreen.jsx  # Tela principal com o tabuleiro
+\`\`\`
 
-When you're ready, run:
+---
 
-```bash
-npm run reset-project
-```
+## 🧠 Como Jogar
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+- **Objetivo**: combine blocos iguais para atingir o número 2048.
+- **Controles**: deslize o dedo para mover os blocos (direita, esquerda, cima ou baixo).
+- **Fim de Jogo**: ocorre quando não há mais movimentos possíveis.
+- Se sua pontuação for uma das 5 maiores, você poderá digitar seu nome e entrar no ranking local!
 
-## Learn more
+---
 
-To learn more about developing your project with Expo, look at the following resources:
+## 📸 Screenshots (opcional)
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+Você pode adicionar imagens aqui se desejar mostrar a tela do app.
 
-## Join the community
+---
 
-Join our community of developers creating universal apps.
+## 🛠️ To-Do (Sugestões futuras)
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+- [ ] Adicionar cores diferentes para cada tile (2, 4, 8, 16, etc.)
+- [ ] Adicionar efeito de animação nos blocos ao se fundirem
+- [ ] Suporte a temas claro/escuro
+- [ ] Compartilhar score
+- [ ] Integração com leaderboard online
+
+---
+
+## 🧑‍💻 Autor
+
+Desenvolvido por **Wilson Júnior** com apoio do ChatGPT.
+
+---
+
+## 📄 Licença
+
+Este projeto é livre para uso pessoal e educacional. Para uso comercial, personalize a licença de acordo com seu caso.
+EOF
